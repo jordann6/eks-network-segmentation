@@ -1,0 +1,482 @@
+# Every workload uses the same image and the same restricted pod spec. Placement
+# is pinned with the lab.node/slot label: frontend and db on slot a, api and
+# sensitive on slot b, so the permitted chain frontend -> api -> db crosses
+# nodes twice. That is what makes the reschedule receipt a cross-node receipt.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: frontend
+  labels:
+    app: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+        lab.role: frontend
+    spec:
+      serviceAccountName: frontend
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # ndots 2: a name with two or more dots is tried as an absolute name
+      # first. With the default of 5, musl walks the search list first, the
+      # hardened DNS proxy correctly REFUSES those expansions, and musl stops at
+      # the first REFUSED instead of falling through. Same in both runs.
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+      nodeSelector:
+        lab.node/slot: "a"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lab
+          image: netseg-lab:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ROLE
+              value: "frontend"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 96Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: frontend
+spec:
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: backend
+  labels:
+    app: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+        lab.role: api
+    spec:
+      serviceAccountName: api
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # ndots 2: a name with two or more dots is tried as an absolute name
+      # first. With the default of 5, musl walks the search list first, the
+      # hardened DNS proxy correctly REFUSES those expansions, and musl stops at
+      # the first REFUSED instead of falling through. Same in both runs.
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+      nodeSelector:
+        lab.node/slot: "b"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lab
+          image: netseg-lab:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ROLE
+              value: "api"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 96Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: backend
+spec:
+  selector:
+    app: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db
+  namespace: backend
+  labels:
+    app: db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+        lab.role: db
+    spec:
+      serviceAccountName: db
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # ndots 2: a name with two or more dots is tried as an absolute name
+      # first. With the default of 5, musl walks the search list first, the
+      # hardened DNS proxy correctly REFUSES those expansions, and musl stops at
+      # the first REFUSED instead of falling through. Same in both runs.
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+      nodeSelector:
+        lab.node/slot: "a"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lab
+          image: netseg-lab:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ROLE
+              value: "db"
+            - name: LAB_DB_PORT
+              value: "5432"
+          ports:
+            - name: db
+              containerPort: 5432
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: 5432
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 96Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  namespace: backend
+spec:
+  selector:
+    app: db
+  ports:
+    - name: db
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sensitive
+  namespace: sensitive
+  labels:
+    app: sensitive
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sensitive
+  template:
+    metadata:
+      labels:
+        app: sensitive
+        lab.role: sensitive
+    spec:
+      serviceAccountName: sensitive
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # ndots 2: a name with two or more dots is tried as an absolute name
+      # first. With the default of 5, musl walks the search list first, the
+      # hardened DNS proxy correctly REFUSES those expansions, and musl stops at
+      # the first REFUSED instead of falling through. Same in both runs.
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+      nodeSelector:
+        lab.node/slot: "b"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lab
+          image: netseg-lab:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ROLE
+              value: "sensitive"
+            - name: SENSITIVE_MARKER
+              value: "SYNTHETIC-SENSITIVE-RECORD"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 96Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sensitive
+  namespace: sensitive
+spec:
+  selector:
+    app: sensitive
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exfil
+  namespace: egress-sim
+  labels:
+    app: exfil
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: exfil
+  template:
+    metadata:
+      labels:
+        app: exfil
+        lab.role: exfil
+    spec:
+      serviceAccountName: receiver
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # ndots 2: a name with two or more dots is tried as an absolute name
+      # first. With the default of 5, musl walks the search list first, the
+      # hardened DNS proxy correctly REFUSES those expansions, and musl stops at
+      # the first REFUSED instead of falling through. Same in both runs.
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+      nodeSelector:
+        lab.node/slot: "b"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lab
+          image: netseg-lab:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ROLE
+              value: "exfil"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 96Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: exfil
+  namespace: egress-sim
+spec:
+  selector:
+    app: exfil
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dns
+  namespace: egress-sim
+  labels:
+    app: dns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dns
+  template:
+    metadata:
+      labels:
+        app: dns
+        lab.role: dns
+    spec:
+      serviceAccountName: receiver
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # ndots 2: a name with two or more dots is tried as an absolute name
+      # first. With the default of 5, musl walks the search list first, the
+      # hardened DNS proxy correctly REFUSES those expansions, and musl stops at
+      # the first REFUSED instead of falling through. Same in both runs.
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+      nodeSelector:
+        lab.node/slot: "b"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lab
+          image: netseg-lab:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ROLE
+              value: "dns"
+          ports:
+            - name: dns
+              containerPort: 5353
+              protocol: UDP
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 96Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dns
+  namespace: egress-sim
+spec:
+  selector:
+    app: dns
+  ports:
+    - name: dns
+      port: 53
+      targetPort: 5353
+      protocol: UDP
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

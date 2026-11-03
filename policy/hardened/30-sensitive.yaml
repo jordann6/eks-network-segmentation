@@ -1,0 +1,15 @@
+# Intentionally no allow rules. The sensitive service is covered by the
+# namespace default deny in 00-default-deny.yaml, so nothing in the cluster
+# can open a connection to it. Kubelet health checks still pass because
+# Cilium allows host-to-pod traffic for probes by default. A real deployment
+# would add a single fromEndpoints rule for its one legitimate caller.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: sensitive-metadata-deny
+  namespace: sensitive
+spec:
+  endpointSelector: {}
+  egressDeny:
+    - toCIDR:
+        - 169.254.169.254/32

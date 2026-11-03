@@ -1,0 +1,13 @@
+# EKS: AWS ENI IPAM, native routing. Pods get real VPC addresses from ENIs the
+# Cilium operator attaches, the same addressing model the VPC CNI uses, but
+# Cilium owns the datapath end to end. No chaining with the VPC CNI: Cilium
+# documents L7 policy limitations in chaining mode, and this lab needs L7 and
+# DNS policy (ADR-0001).
+ipam:
+  mode: eni
+eni:
+  enabled: true
+routingMode: native
+# Masquerade pod traffic leaving the VPC through the node's ENIs (internet via
+# NAT). Intra-VPC traffic keeps the pod IP, so Hubble sees real pod addresses.
+egressMasqueradeInterfaces: eth+

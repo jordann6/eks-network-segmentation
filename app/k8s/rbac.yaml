@@ -1,0 +1,41 @@
+# The foothold's identity. Minimal from the start and identical in both runs
+# (ADR-0002): no token is mounted, and the ServiceAccount has no Role or
+# RoleBinding anywhere, so even a stolen token could not edit a
+# NetworkPolicy, a CiliumNetworkPolicy or a pod label. That matters because
+# identity-based policy keys off labels; an attacker who could relabel the
+# frontend pod as backend-api would walk through every rule. The runner proves
+# this with `kubectl auth can-i` before trusting any result.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend
+  namespace: frontend
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api
+  namespace: backend
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: db
+  namespace: backend
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sensitive
+  namespace: sensitive
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: receiver
+  namespace: egress-sim
+automountServiceAccountToken: false

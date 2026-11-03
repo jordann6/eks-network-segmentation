@@ -1,0 +1,32 @@
+# Settings shared by kind and EKS. Only IPAM and routing differ between the two
+# (values-kind.yaml, values-eks.yaml); the policy engine, the L7 proxy, the DNS
+# proxy and Hubble are identical, so a result proven on kind means the same
+# thing on EKS.
+
+# The L7 HTTP rule and the DNS query-name rule both depend on the Envoy proxy
+# and the DNS proxy. Both are on by default; stated here so nobody turns them
+# off to save memory and silently loses half the matrix.
+l7Proxy: true
+
+# Cilium answers a DNS query that the policy forbids with REFUSED. The scenario
+# runner keys DNS enforcement evidence off that rcode, so pin it.
+dnsProxy:
+  dnsRejectResponseCode: refused
+
+# Undo the NoExecute taint the nodes carry so nothing schedules before Cilium
+# is managing the node (EKS node group sets it; harmless on kind).
+agentNotReadyTaintKey: node.cilium.io/agent-not-ready
+
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: false
+  # Large ring buffer per node so a full matrix run fits without overwriting
+  # flows before the runner exports them. The runner still checks for lost
+  # events and records any gap in the report.
+  eventBufferCapacity: "65535"
+
+operator:
+  replicas: 1

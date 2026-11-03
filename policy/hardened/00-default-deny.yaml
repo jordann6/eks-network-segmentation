@@ -1,0 +1,30 @@
+# Default deny, ingress and egress, in every namespace under test. Written as
+# stock Kubernetes NetworkPolicy on purpose: this part is not a Cilium feature
+# and the VPC CNI enforces the same object (ADR-0003). Everything Cilium
+# specific is layered on top as explicit allows in the files that follow.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: frontend
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: backend
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: sensitive
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]

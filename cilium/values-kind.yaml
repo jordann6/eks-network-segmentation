@@ -1,0 +1,6 @@
+# kind: Kubernetes host-scope IPAM, tunnel routing. kube-proxy stays in place on
+# both kind and EKS so the only moving part under test is policy.
+ipam:
+  mode: kubernetes
+image:
+  pullPolicy: IfNotPresent

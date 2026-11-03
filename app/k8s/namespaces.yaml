@@ -1,0 +1,35 @@
+# Four namespaces. egress-sim stands in for "the internet": the controlled exfil
+# receiver and the controlled authoritative DNS server live there so the egress
+# tests are fully observable and never depend on a third-party endpoint. No
+# policy ever selects egress-sim; it is the far end, not a workload under test.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: frontend
+  labels:
+    lab.zone: frontend
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backend
+  labels:
+    lab.zone: backend
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sensitive
+  labels:
+    lab.zone: sensitive
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: egress-sim
+  labels:
+    lab.zone: egress-sim
+    pod-security.kubernetes.io/enforce: restricted

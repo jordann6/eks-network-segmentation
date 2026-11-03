@@ -1,0 +1,40 @@
+# BASELINE: permissive, but present. Each lab namespace carries an explicit
+# allow-all CiliumNetworkPolicy instead of "no policy at all", so the baseline
+# and hardened runs differ only in the content of policy objects (ADR-0002),
+# and the policy engine is demonstrably loaded and enforcing in both runs.
+# egress-sim is never selected by any policy: it is the far end.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: lab-permissive
+  namespace: frontend
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEntities: ["all"]
+  egress:
+    - toEntities: ["all"]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: lab-permissive
+  namespace: backend
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEntities: ["all"]
+  egress:
+    - toEntities: ["all"]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: lab-permissive
+  namespace: sensitive
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEntities: ["all"]
+  egress:
+    - toEntities: ["all"]

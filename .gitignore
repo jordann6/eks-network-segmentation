@@ -1,0 +1,31 @@
+
+# --- platform-guardrails ---
+*.tfstate
+*.tfstate.*
+*.tfvars
+!example.tfvars
+tfplan
+plan.json
+.terraform/
+crash.log
+.env
+.envrc
+kubeconfig
+*.kubeconfig
+*.pem
+*.ppk
+.checkov.json
+infracost.json
+
+# python
+__pycache__/
+*.pyc
+
+# scenario runs. Only the curated reference runs under evidence/ are committed
+# (see evidence/README.md); ad-hoc runs stay local.
+evidence/*
+!evidence/README.md
+!evidence/kind-reference/
+!evidence/eks-reference/
+app/k8s/eks/
+infra/destroy.tfplan

@@ -1,0 +1,71 @@
+# The backend API accepts exactly one operation from the frontend: GET
+# /api/orders. Identity, not IP, picks the caller (fromEndpoints matches the
+# frontend pod's labels, which Cilium turns into a numeric security identity
+# that survives rescheduling). The L7 rule is what turns
+# POST /api/admin/export into an HTTP 403 from the Envoy proxy, even though
+# the same TCP port stays open for the permitted GET.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: api
+  namespace: backend
+spec:
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: frontend
+            app: frontend
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+          rules:
+            http:
+              - method: GET
+                path: "^/api/orders$"
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: db
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchName: db.backend.svc.cluster.local
+  egressDeny:
+    - toCIDR:
+        - 169.254.169.254/32
+---
+# The database talks to the API and nobody else.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: db
+  namespace: backend
+spec:
+  endpointSelector:
+    matchLabels:
+      app: db
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: api
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP

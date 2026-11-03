@@ -1,0 +1,50 @@
+name: Guardrails
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Credential-free by design. Everything below runs static analysis over
+# Terraform that, on a pull_request event, was authored by whoever opened the
+# PR. Nothing here should ever hold a permission that can mint a cloud token.
+#
+# The credentialed gates (plan, destroy guard, cost diff) live in tf-plan.yml
+# and are deliberately not wired up here, because they need an OIDC role ARN
+# that this installer has no way to know. See "The credentialed half" in the
+# platform-guardrails README for the block to paste in once you have a role.
+permissions:
+  contents: read
+
+jobs:
+  static:
+    uses: jordann6/platform-guardrails/.github/workflows/tf-ci.yml@8eb9a745e4297682a4e8a5478c363280d6605ff5 # v1.9.1
+    with:
+      terraform_dir: infra
+      guardrails_ref: 8eb9a745e4297682a4e8a5478c363280d6605ff5
+      # The only accepted Checkov finding is CKV_TF_1 (registry modules pinned
+      # by version range, not commit hash), the same exception the sibling
+      # repos carry. This lab is not vulnerable at the infra layer.
+      checkov_baseline: infra/.checkov.baseline
+
+  # The FinOps allocation policy (finops.rego) already runs inside `static`
+  # above, because tf-ci.yml evaluates the whole shared policy/ directory. So
+  # the CostCenter tag gate needs no wiring: it is on the moment this file is.
+  #
+  # The one FinOps piece that is NOT credential-free is the cost *threshold*.
+  # It needs the INFRACOST_API_KEY secret (free tier is fine), so it stays
+  # commented until that secret exists on the repo, matching the plan gate.
+  # Uncomment once it does:
+  #
+  # finops:
+  #   uses: jordann6/platform-guardrails/.github/workflows/finops-gate.yml@8eb9a745e4297682a4e8a5478c363280d6605ff5 # v1.9.1
+  #   permissions:
+  #     contents: read
+  #     pull-requests: write
+  #   with:
+  #     terraform_dir: infra
+  #     max_monthly_increase: "50"   # USD/month a PR may add before it fails
+  #     fail_on_cost: true           # false = comment only
+  #     guardrails_ref: 8eb9a745e4297682a4e8a5478c363280d6605ff5
+  #   secrets:
+  #     INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}

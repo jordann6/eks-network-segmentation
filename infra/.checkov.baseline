@@ -1,0 +1,26 @@
+{
+    "failed_checks": [
+        {
+            "file": "/eks.tf",
+            "findings": [
+                {
+                    "resource": "eks",
+                    "check_ids": [
+                        "CKV_TF_1"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/vpc.tf",
+            "findings": [
+                {
+                    "resource": "vpc",
+                    "check_ids": [
+                        "CKV_TF_1"
+                    ]
+                }
+            ]
+        }
+    ]
+}

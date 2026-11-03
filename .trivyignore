@@ -1,0 +1,21 @@
+# Accepted Trivy findings for the segmentation lab. Unlike eks-attack-range,
+# nothing here is a planted weakness; each line is a deliberate scope choice
+# for a throwaway deploy/demo/destroy lab. IDs verified against
+# `trivy config infra` (CRITICAL,HIGH).
+
+# AVD-AWS-0040 "EKS Clusters should have the public access disabled."
+# AVD-AWS-0041 "EKS cluster should not have open CIDR range for public access."
+# The scenario runner drives kubectl and Hubble from the operator's machine,
+# so the endpoint is public but scoped to a single /32 (0.0.0.0/0 is refused in
+# variables.tf). A /32 still fires 0041; only a private endpoint clears it,
+# which is what the paved road in aws-landing-zone uses.
+AVD-AWS-0040
+AVD-AWS-0041
+
+# AVD-AWS-0104 "Security group rule should not allow unrestricted egress."
+# Upstream default inside terraform-aws-modules/eks (node security group
+# egress_all), reached because a config scan downloads remote modules. Left as
+# is on purpose: tightening node security groups between runs would add a
+# second control to the experiment (ADR-0002). Egress control here is the pod
+# policy under test.
+AVD-AWS-0104

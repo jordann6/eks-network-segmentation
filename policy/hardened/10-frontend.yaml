@@ -1,0 +1,49 @@
+# The compromised workload. Two things it may do, nothing else:
+#   1. open TCP 8080 to the backend API (what it may SAY there is decided by
+#      the L7 rule on the API's ingress, 20-backend.yaml), and
+#   2. ask the cluster resolver for exactly one name.
+#
+# DNS is two separate controls (ADR-0004). Destination filtering: the only
+# DNS server this pod may talk to is kube-dns, so a direct query to an
+# attacker's resolver is dropped at L3/L4. Query-name filtering: the Cilium
+# DNS proxy inspects every question to kube-dns and answers REFUSED for any
+# name not listed, so a marker hidden in a query name never leaves the proxy.
+# A toFQDNs allowlist alone would do neither: it governs where the pod may
+# connect after resolution, not what it may ask.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: frontend-egress
+  namespace: frontend
+spec:
+  endpointSelector:
+    matchLabels:
+      app: frontend
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: backend
+            app: api
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchName: api.backend.svc.cluster.local
+  # Belt and braces for the metadata endpoint. Default deny already drops it;
+  # an explicit deny survives a future allow rule that is broader than meant
+  # (deny always wins over allow in Cilium).
+  egressDeny:
+    - toCIDR:
+        - 169.254.169.254/32
