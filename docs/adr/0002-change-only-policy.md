@@ -37,6 +37,11 @@ Corollaries:
   the egress rows. Those belong in production as defense in depth (README,
   Production scale), and could be measured as a separate profile later.
 
+One infra setting exists only to keep that true on EKS: under Cilium ENI IPAM,
+pods carry the node security group, so the node group trusts itself on all
+ports. Otherwise the security group, not the policy, decides which cross-node
+pod flows work (the first live run lost the DNS row this way).
+
 ## Alternatives rejected
 
 | Option | Why not |

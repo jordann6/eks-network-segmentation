@@ -1,0 +1,821 @@
+{
+  "run_id": "eks-reference",
+  "context": "netseg-eks",
+  "started": "2026-11-03T15:49:25Z",
+  "finished": "2026-11-03T15:53:09Z",
+  "pass": false,
+  "preconditions": {
+    "cilium_ready": true,
+    "hubble_ready": true,
+    "cilium_image": "quay.io/cilium/cilium:v1.20.4",
+    "foothold_rbac": {
+      "create ciliumnetworkpolicies.cilium.io -n frontend": "no",
+      "delete networkpolicies -n frontend": "no",
+      "patch pods -n frontend (relabel itself)": "no",
+      "patch pods -n backend": "no",
+      "create pods -n backend": "no"
+    },
+    "foothold_rbac_minimal": true,
+    "foothold_token": "absent",
+    "rce_uid": "10001"
+  },
+  "profiles": [
+    {
+      "profile": "baseline",
+      "started": "2026-11-03T15:49:52Z",
+      "finished": "2026-11-03T15:50:24Z",
+      "rce_answers": true,
+      "hubble": {
+        "flows": 774,
+        "lost_events": 0
+      },
+      "results": {
+        "frontend-to-api": {
+          "title": "Frontend to permitted backend route (GET /api/orders)",
+          "kind": "legit",
+          "layer": "L7",
+          "matrix": true,
+          "status": "allowed",
+          "reason": "legitimate flow succeeded",
+          "expected": "Allowed",
+          "observed": "Allowed",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:49:54Z",
+            "2026-11-03T15:49:56Z"
+          ],
+          "client": {
+            "rc": 0,
+            "http_code": "200"
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        },
+        "api-to-db": {
+          "title": "Backend to database",
+          "kind": "legit",
+          "layer": "L3/L4",
+          "matrix": true,
+          "status": "allowed",
+          "reason": "legitimate flow succeeded",
+          "expected": "Allowed",
+          "observed": "Allowed",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:49:56Z",
+            "2026-11-03T15:49:59Z"
+          ],
+          "client": {
+            "rc": 0,
+            "reply": "PONG",
+            "stderr": ""
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        },
+        "frontend-to-sensitive": {
+          "title": "Frontend to sensitive service",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": true,
+          "status": "exploitable",
+          "reason": "attacker reached the destination",
+          "expected": "Allowed",
+          "observed": "Allowed",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:49:59Z",
+            "2026-11-03T15:50:02Z"
+          ],
+          "client": {
+            "by_name_rc": 0,
+            "by_ip_rc": 0,
+            "cluster_ip": "172.20.27.17"
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        },
+        "http-exfil": {
+          "title": "Frontend to controlled exfil receiver",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": true,
+          "status": "exploitable",
+          "reason": "attacker reached the destination",
+          "expected": "Received",
+          "observed": "Received",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:50:02Z",
+            "2026-11-03T15:50:07Z"
+          ],
+          "client": {
+            "by_name_rc": 0,
+            "by_ip_rc": 0,
+            "received_at_receiver": [
+              "netseg-eks-reference-baseline-http-1d5965-name",
+              "netseg-eks-reference-baseline-http-1d5965-ip"
+            ]
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        },
+        "dns-exfil": {
+          "title": "Synthetic DNS marker to authoritative receiver",
+          "kind": "attack",
+          "layer": "DNS",
+          "matrix": true,
+          "status": "error",
+          "reason": "baseline did not reach the destination; a hardened result would prove nothing",
+          "expected": "Received",
+          "observed": "error",
+          "pass": false,
+          "window": [
+            "2026-11-03T15:50:07Z",
+            "2026-11-03T15:50:18Z"
+          ],
+          "client": {
+            "resolver_status": "none",
+            "direct_rc": 9,
+            "direct_timed_out": true,
+            "received_at_receiver": []
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        },
+        "forbidden-http": {
+          "title": "Frontend to forbidden backend HTTP operation (POST /api/admin/export)",
+          "kind": "attack",
+          "layer": "L7",
+          "matrix": true,
+          "status": "exploitable",
+          "reason": "attacker reached the destination",
+          "expected": "Allowed",
+          "observed": "Allowed",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:50:18Z",
+            "2026-11-03T15:50:19Z"
+          ],
+          "client": {
+            "rc": 0,
+            "http_code": "200",
+            "body": "{\"export\": \"SYNTHETIC-BULK-EXPORT\", \"rows\": 3}"
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        },
+        "metadata": {
+          "title": "Frontend reaches instance metadata (prerequisite probe, T1552.005)",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": false,
+          "status": "exploitable",
+          "reason": "attacker reached the destination",
+          "expected": "Allowed",
+          "observed": "Allowed",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:50:19Z",
+            "2026-11-03T15:50:20Z"
+          ],
+          "client": {
+            "rc": 0,
+            "http_code": "200"
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        },
+        "internet-egress": {
+          "title": "Frontend to public internet (example.com:443)",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": false,
+          "status": "exploitable",
+          "reason": "attacker reached the destination",
+          "expected": "Allowed",
+          "observed": "Allowed",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:50:20Z",
+            "2026-11-03T15:50:20Z"
+          ],
+          "client": {
+            "rc": 0,
+            "http_code": "200"
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        }
+      }
+    },
+    {
+      "profile": "hardened",
+      "started": "2026-11-03T15:50:38Z",
+      "finished": "2026-11-03T15:51:21Z",
+      "rce_answers": true,
+      "hubble": {
+        "flows": 955,
+        "lost_events": 0
+      },
+      "results": {
+        "frontend-to-api": {
+          "title": "Frontend to permitted backend route (GET /api/orders)",
+          "kind": "legit",
+          "layer": "L7",
+          "matrix": true,
+          "status": "allowed",
+          "reason": "legitimate flow succeeded",
+          "expected": "Allowed",
+          "observed": "Allowed",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:50:40Z",
+            "2026-11-03T15:50:42Z"
+          ],
+          "client": {
+            "rc": 0,
+            "http_code": "200"
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        },
+        "api-to-db": {
+          "title": "Backend to database",
+          "kind": "legit",
+          "layer": "L3/L4",
+          "matrix": true,
+          "status": "allowed",
+          "reason": "legitimate flow succeeded",
+          "expected": "Allowed",
+          "observed": "Allowed",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:50:42Z",
+            "2026-11-03T15:50:45Z"
+          ],
+          "client": {
+            "rc": 0,
+            "reply": "PONG",
+            "stderr": ""
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        },
+        "frontend-to-sensitive": {
+          "title": "Frontend to sensitive service",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": true,
+          "status": "blocked",
+          "reason": "denied with L3/L4 enforcement evidence (10 matching flows)",
+          "expected": "Denied",
+          "observed": "Denied",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:50:45Z",
+            "2026-11-03T15:50:53Z"
+          ],
+          "client": {
+            "by_name_rc": 6,
+            "by_ip_rc": 28,
+            "cluster_ip": "172.20.27.17"
+          },
+          "evidence": {
+            "matching_flows": 10,
+            "exemplar": {
+              "time": "2026-11-03T15:50:48.233548399Z",
+              "verdict": "DROPPED",
+              "drop_reason": "POLICY_DENIED",
+              "type": "L3_L4",
+              "src": "frontend/frontend-567b9d7d9d-qgn8r",
+              "src_identity": 48469,
+              "dst": "sensitive/sensitive-8fdc4bbf5-x4nqz",
+              "dst_identity": 1527,
+              "dst_port": 8080,
+              "node": "ip-10-20-1-93.ec2.internal"
+            }
+          }
+        },
+        "http-exfil": {
+          "title": "Frontend to controlled exfil receiver",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": true,
+          "status": "blocked",
+          "reason": "denied with L3/L4 enforcement evidence (10 matching flows)",
+          "expected": "Denied",
+          "observed": "Denied",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:50:53Z",
+            "2026-11-03T15:51:03Z"
+          ],
+          "client": {
+            "by_name_rc": 6,
+            "by_ip_rc": 28,
+            "received_at_receiver": []
+          },
+          "evidence": {
+            "matching_flows": 10,
+            "exemplar": {
+              "time": "2026-11-03T15:50:55.994923528Z",
+              "verdict": "DROPPED",
+              "drop_reason": "POLICY_DENIED",
+              "type": "L3_L4",
+              "src": "frontend/frontend-567b9d7d9d-qgn8r",
+              "src_identity": 48469,
+              "dst": "egress-sim/exfil-66c7b4dff9-kcc8p",
+              "dst_identity": 11181,
+              "dst_port": 8080,
+              "node": "ip-10-20-1-93.ec2.internal"
+            }
+          }
+        },
+        "dns-exfil": {
+          "title": "Synthetic DNS marker to authoritative receiver",
+          "kind": "attack",
+          "layer": "DNS",
+          "matrix": true,
+          "status": "skipped",
+          "reason": "baseline was 'error', so no defense can be claimed",
+          "expected": "Denied",
+          "observed": "skipped",
+          "pass": false,
+          "window": [
+            "2026-11-03T15:51:03Z",
+            "2026-11-03T15:51:11Z"
+          ],
+          "client": {
+            "resolver_status": "REFUSED",
+            "direct_rc": 9,
+            "direct_timed_out": true,
+            "received_at_receiver": []
+          },
+          "evidence": {
+            "matching_flows": 3,
+            "exemplar": {
+              "time": "2026-11-03T15:51:04.984021607Z",
+              "verdict": "DROPPED",
+              "drop_reason": null,
+              "type": "L7",
+              "src": "frontend/frontend-567b9d7d9d-qgn8r",
+              "src_identity": 48469,
+              "dst": "kube-system/coredns-649847494d-8jzk4",
+              "dst_identity": 6722,
+              "dst_port": 53,
+              "node": "ip-10-20-1-93.ec2.internal",
+              "dns_query": "m5c1cd927-hardened.exfil.lab.test."
+            }
+          }
+        },
+        "forbidden-http": {
+          "title": "Frontend to forbidden backend HTTP operation (POST /api/admin/export)",
+          "kind": "attack",
+          "layer": "L7",
+          "matrix": true,
+          "status": "blocked",
+          "reason": "denied with L7 enforcement evidence (1 matching flows)",
+          "expected": "Denied",
+          "observed": "Denied",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:51:11Z",
+            "2026-11-03T15:51:13Z"
+          ],
+          "client": {
+            "rc": 0,
+            "http_code": "403",
+            "body": "Access denied"
+          },
+          "evidence": {
+            "matching_flows": 1,
+            "exemplar": {
+              "time": "2026-11-03T15:51:13.314459789Z",
+              "verdict": "DROPPED",
+              "drop_reason": null,
+              "type": "L7",
+              "src": "frontend/frontend-567b9d7d9d-qgn8r",
+              "src_identity": 48469,
+              "dst": "backend/api-774768694f-5j7vn",
+              "dst_identity": 10369,
+              "dst_port": 8080,
+              "node": "ip-10-20-19-119.ec2.internal",
+              "http": "POST http://api.backend.svc.cluster.local:8080/api/admin/export"
+            }
+          }
+        },
+        "metadata": {
+          "title": "Frontend reaches instance metadata (prerequisite probe, T1552.005)",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": false,
+          "status": "blocked",
+          "reason": "denied with L3/L4 enforcement evidence (8 matching flows)",
+          "expected": "Denied",
+          "observed": "Denied",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:51:13Z",
+            "2026-11-03T15:51:17Z"
+          ],
+          "client": {
+            "rc": 28,
+            "http_code": "000"
+          },
+          "evidence": {
+            "matching_flows": 8,
+            "exemplar": {
+              "time": "2026-11-03T15:51:13.434499271Z",
+              "verdict": "DROPPED",
+              "drop_reason": "POLICY_DENY",
+              "type": "L3_L4",
+              "src": "frontend/frontend-567b9d7d9d-qgn8r",
+              "src_identity": 48469,
+              "dst": "169.254.169.254",
+              "dst_identity": 16777218,
+              "dst_port": 80,
+              "node": "ip-10-20-1-93.ec2.internal"
+            }
+          }
+        },
+        "internet-egress": {
+          "title": "Frontend to public internet (example.com:443)",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": false,
+          "status": "blocked",
+          "reason": "denied with L3/L4 enforcement evidence (6 matching flows)",
+          "expected": "Denied",
+          "observed": "Denied",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:51:17Z",
+            "2026-11-03T15:51:17Z"
+          ],
+          "client": {
+            "rc": 6,
+            "http_code": "000"
+          },
+          "evidence": {
+            "matching_flows": 6,
+            "exemplar": {
+              "time": "2026-11-03T15:51:14.513002954Z",
+              "verdict": "DROPPED",
+              "drop_reason": "POLICY_DENY",
+              "type": "L3_L4",
+              "src": "frontend/frontend-567b9d7d9d-qgn8r",
+              "src_identity": 48469,
+              "dst": "169.254.169.254",
+              "dst_identity": 16777218,
+              "dst_port": 80,
+              "node": "ip-10-20-1-93.ec2.internal"
+            }
+          }
+        }
+      }
+    },
+    {
+      "profile": "reschedule",
+      "started": "2026-11-03T15:52:27Z",
+      "finished": "2026-11-03T15:53:09Z",
+      "rce_answers": true,
+      "hubble": {
+        "flows": 948,
+        "lost_events": 0
+      },
+      "results": {
+        "frontend-to-api": {
+          "title": "Frontend to permitted backend route (GET /api/orders)",
+          "kind": "legit",
+          "layer": "L7",
+          "matrix": true,
+          "status": "allowed",
+          "reason": "legitimate flow succeeded",
+          "expected": "Allowed",
+          "observed": "Allowed",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:52:28Z",
+            "2026-11-03T15:52:30Z"
+          ],
+          "client": {
+            "rc": 0,
+            "http_code": "200"
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        },
+        "api-to-db": {
+          "title": "Backend to database",
+          "kind": "legit",
+          "layer": "L3/L4",
+          "matrix": true,
+          "status": "allowed",
+          "reason": "legitimate flow succeeded",
+          "expected": "Allowed",
+          "observed": "Allowed",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:52:30Z",
+            "2026-11-03T15:52:33Z"
+          ],
+          "client": {
+            "rc": 0,
+            "reply": "PONG",
+            "stderr": ""
+          },
+          "evidence": {
+            "matching_flows": 0,
+            "exemplar": null
+          }
+        },
+        "frontend-to-sensitive": {
+          "title": "Frontend to sensitive service",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": true,
+          "status": "blocked",
+          "reason": "denied with L3/L4 enforcement evidence (10 matching flows)",
+          "expected": "Denied",
+          "observed": "Denied",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:52:33Z",
+            "2026-11-03T15:52:41Z"
+          ],
+          "client": {
+            "by_name_rc": 6,
+            "by_ip_rc": 28,
+            "cluster_ip": "172.20.27.17"
+          },
+          "evidence": {
+            "matching_flows": 10,
+            "exemplar": {
+              "time": "2026-11-03T15:52:36.772735018Z",
+              "verdict": "DROPPED",
+              "drop_reason": "POLICY_DENIED",
+              "type": "L3_L4",
+              "src": "frontend/frontend-546f78b6c7-xq46z",
+              "src_identity": 48469,
+              "dst": "sensitive/sensitive-8fdc4bbf5-x4nqz",
+              "dst_identity": 1527,
+              "dst_port": 8080,
+              "node": "ip-10-20-19-119.ec2.internal"
+            }
+          }
+        },
+        "http-exfil": {
+          "title": "Frontend to controlled exfil receiver",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": true,
+          "status": "blocked",
+          "reason": "denied with L3/L4 enforcement evidence (10 matching flows)",
+          "expected": "Denied",
+          "observed": "Denied",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:52:41Z",
+            "2026-11-03T15:52:51Z"
+          ],
+          "client": {
+            "by_name_rc": 6,
+            "by_ip_rc": 28,
+            "received_at_receiver": []
+          },
+          "evidence": {
+            "matching_flows": 10,
+            "exemplar": {
+              "time": "2026-11-03T15:52:44.550067202Z",
+              "verdict": "DROPPED",
+              "drop_reason": "POLICY_DENIED",
+              "type": "L3_L4",
+              "src": "frontend/frontend-546f78b6c7-xq46z",
+              "src_identity": 48469,
+              "dst": "egress-sim/exfil-66c7b4dff9-kcc8p",
+              "dst_identity": 11181,
+              "dst_port": 8080,
+              "node": "ip-10-20-19-119.ec2.internal"
+            }
+          }
+        },
+        "dns-exfil": {
+          "title": "Synthetic DNS marker to authoritative receiver",
+          "kind": "attack",
+          "layer": "DNS",
+          "matrix": true,
+          "status": "skipped",
+          "reason": "baseline was 'error', so no defense can be claimed",
+          "expected": "Denied",
+          "observed": "skipped",
+          "pass": false,
+          "window": [
+            "2026-11-03T15:52:51Z",
+            "2026-11-03T15:53:00Z"
+          ],
+          "client": {
+            "resolver_status": "REFUSED",
+            "direct_rc": 9,
+            "direct_timed_out": true,
+            "received_at_receiver": []
+          },
+          "evidence": {
+            "matching_flows": 3,
+            "exemplar": {
+              "time": "2026-11-03T15:52:53.470452138Z",
+              "verdict": "DROPPED",
+              "drop_reason": null,
+              "type": "L7",
+              "src": "frontend/frontend-546f78b6c7-xq46z",
+              "src_identity": 48469,
+              "dst": "kube-system/coredns-649847494d-rnlkd",
+              "dst_identity": 6722,
+              "dst_port": 53,
+              "node": "ip-10-20-19-119.ec2.internal",
+              "dns_query": "mdbbb0bf1-reschedule.exfil.lab.test."
+            }
+          }
+        },
+        "forbidden-http": {
+          "title": "Frontend to forbidden backend HTTP operation (POST /api/admin/export)",
+          "kind": "attack",
+          "layer": "L7",
+          "matrix": true,
+          "status": "blocked",
+          "reason": "denied with L7 enforcement evidence (1 matching flows)",
+          "expected": "Denied",
+          "observed": "Denied",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:53:00Z",
+            "2026-11-03T15:53:01Z"
+          ],
+          "client": {
+            "rc": 0,
+            "http_code": "403",
+            "body": "Access denied"
+          },
+          "evidence": {
+            "matching_flows": 1,
+            "exemplar": {
+              "time": "2026-11-03T15:53:01.762439286Z",
+              "verdict": "DROPPED",
+              "drop_reason": null,
+              "type": "L7",
+              "src": "frontend/frontend-546f78b6c7-xq46z",
+              "src_identity": 48469,
+              "dst": "backend/api-8677bcd69d-2pdvb",
+              "dst_identity": 10369,
+              "dst_port": 8080,
+              "node": "ip-10-20-1-93.ec2.internal",
+              "http": "POST http://api.backend.svc.cluster.local:8080/api/admin/export"
+            }
+          }
+        },
+        "metadata": {
+          "title": "Frontend reaches instance metadata (prerequisite probe, T1552.005)",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": false,
+          "status": "blocked",
+          "reason": "denied with L3/L4 enforcement evidence (8 matching flows)",
+          "expected": "Denied",
+          "observed": "Denied",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:53:01Z",
+            "2026-11-03T15:53:05Z"
+          ],
+          "client": {
+            "rc": 28,
+            "http_code": "000"
+          },
+          "evidence": {
+            "matching_flows": 8,
+            "exemplar": {
+              "time": "2026-11-03T15:53:01.946590508Z",
+              "verdict": "DROPPED",
+              "drop_reason": "POLICY_DENY",
+              "type": "L3_L4",
+              "src": "frontend/frontend-546f78b6c7-xq46z",
+              "src_identity": 48469,
+              "dst": "169.254.169.254",
+              "dst_identity": 16777218,
+              "dst_port": 80,
+              "node": "ip-10-20-19-119.ec2.internal"
+            }
+          }
+        },
+        "internet-egress": {
+          "title": "Frontend to public internet (example.com:443)",
+          "kind": "attack",
+          "layer": "L3/L4",
+          "matrix": false,
+          "status": "blocked",
+          "reason": "denied with L3/L4 enforcement evidence (6 matching flows)",
+          "expected": "Denied",
+          "observed": "Denied",
+          "pass": true,
+          "window": [
+            "2026-11-03T15:53:05Z",
+            "2026-11-03T15:53:06Z"
+          ],
+          "client": {
+            "rc": 6,
+            "http_code": "000"
+          },
+          "evidence": {
+            "matching_flows": 6,
+            "exemplar": {
+              "time": "2026-11-03T15:53:02.981219985Z",
+              "verdict": "DROPPED",
+              "drop_reason": "POLICY_DENY",
+              "type": "L3_L4",
+              "src": "frontend/frontend-546f78b6c7-xq46z",
+              "src_identity": 48469,
+              "dst": "169.254.169.254",
+              "dst_identity": 16777218,
+              "dst_port": 80,
+              "node": "ip-10-20-19-119.ec2.internal"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "reschedule": {
+    "before": [
+      {
+        "workload": "frontend/frontend",
+        "pod": "frontend-567b9d7d9d-qgn8r",
+        "ip": "10.20.9.137",
+        "node": "10.20.1.93",
+        "identity": 48469
+      },
+      {
+        "workload": "backend/api",
+        "pod": "api-774768694f-5j7vn",
+        "ip": "10.20.22.34",
+        "node": "10.20.19.119",
+        "identity": 10369
+      },
+      {
+        "workload": "backend/db",
+        "pod": "db-5b9447df59-tm4pd",
+        "ip": "10.20.4.158",
+        "node": "10.20.1.93",
+        "identity": 6721
+      }
+    ],
+    "after": [
+      {
+        "workload": "frontend/frontend",
+        "pod": "frontend-546f78b6c7-xq46z",
+        "ip": "10.20.21.0",
+        "node": "10.20.19.119",
+        "identity": 48469
+      },
+      {
+        "workload": "backend/api",
+        "pod": "api-8677bcd69d-2pdvb",
+        "ip": "10.20.15.161",
+        "node": "10.20.1.93",
+        "identity": 10369
+      },
+      {
+        "workload": "backend/db",
+        "pod": "db-6c99b56d-5wx6k",
+        "ip": "10.20.25.172",
+        "node": "10.20.19.119",
+        "identity": 6721
+      }
+    ],
+    "ips_changed": true,
+    "nodes_changed": true,
+    "identities_stable": true,
+    "results_identical": true
+  }
+}

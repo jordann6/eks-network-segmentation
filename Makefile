@@ -46,8 +46,8 @@ kind-down: ## Delete the kind cluster
 .PHONY: app
 app: ## Deploy the four-namespace topology and receivers (refuses to run before the readiness gate passes)
 	cilium/readiness-gate.sh
-	@if [[ -f app/k8s/eks/kustomization.yaml && "$$(kubectl config current-context)" != kind-* ]]; then \
-		kubectl apply -k app/k8s/eks; else kubectl apply -k app/k8s; fi
+	@if [[ -f app/k8s-eks/kustomization.yaml && "$$(kubectl config current-context)" != kind-* ]]; then \
+		kubectl apply -k app/k8s-eks; else kubectl apply -k app/k8s; fi
 	for ns in frontend backend sensitive egress-sim; do \
 		kubectl -n $$ns rollout status deploy --timeout=180s; done
 	scripts/coredns-stub.sh
@@ -100,9 +100,9 @@ eks-image: ## Build linux/amd64, push the git-SHA tag to ECR, write the EKS kust
 	aws ecr get-login-password --region $$($(TF) output -raw region) \
 		| docker login --username AWS --password-stdin $(word 1,$(subst /, ,$(ECR)))
 	docker buildx build --platform linux/amd64 -t $(ECR):$(IMAGE_TAG) --push app
-	mkdir -p app/k8s/eks
-	printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - ..\nimages:\n  - name: netseg-lab\n    newName: %s\n    newTag: "%s"\n' \
-		"$(ECR)" "$(IMAGE_TAG)" > app/k8s/eks/kustomization.yaml
+	mkdir -p app/k8s-eks
+	printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - ../k8s\nimages:\n  - name: netseg-lab\n    newName: %s\n    newTag: "%s"\n' \
+		"$(ECR)" "$(IMAGE_TAG)" > app/k8s-eks/kustomization.yaml
 
 .PHONY: eks-destroy-plan
 eks-destroy-plan: ## Remove workloads + Cilium, then write infra/destroy.tfplan and print the destroy command
@@ -115,7 +115,9 @@ eks-destroy-plan: ## Remove workloads + Cilium, then write infra/destroy.tfplan 
 
 .PHONY: eks-verify-gone
 eks-verify-gone: ## Confirm nothing hourly survived: no cluster, no NAT gateway, no lab ENIs
-	@r=$$($(TF) output -raw region 2>/dev/null || echo us-east-1); \
+	@# Not read from terraform output: after a destroy the state has no outputs
+	@# and terraform prints its warning on stdout, which corrupts the value.
+	@r=$${AWS_REGION:-us-east-1}; \
 	echo "clusters:   $$(aws eks list-clusters --region $$r --query 'clusters[?@==`netseg`]' --output text)"; \
 	echo "nat gws:    $$(aws ec2 describe-nat-gateways --region $$r --filter Name=tag:Project,Values=eks-network-segmentation Name=state,Values=available,pending --query 'NatGateways[].NatGatewayId' --output text)"; \
 	echo "lab ENIs:   $$(aws ec2 describe-network-interfaces --region $$r --filters Name=tag:cilium-managed,Values=true --query 'NetworkInterfaces[].NetworkInterfaceId' --output text)"; \

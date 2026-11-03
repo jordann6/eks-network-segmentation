@@ -39,33 +39,43 @@ the baseline and denied after hardening, each by the layer named on the edge.*
 
 ## The result
 
-From `evidence/kind-reference/report.md` (Cilium 1.20.4 on kind, three nodes):
+From the live run, `evidence/eks-reference/report.md` (EKS 1.34, Cilium 1.20.4
+with AWS ENI IPAM, two nodes, deployed, measured and destroyed in one sitting):
 
 | Test | Baseline | Hardened | After reschedule | Enforcement evidence (hardened) |
 | ---- | -------- | -------- | ---------------- | ------------------------------- |
 | Frontend to permitted backend route | Allowed | Allowed | Allowed | still passes (HTTP 200) |
 | Backend to database | Allowed | Allowed | Allowed | still passes |
-| Frontend to sensitive service | Allowed | Denied | Denied | Hubble `DROPPED POLICY_DENIED`, frontend identity to sensitive identity, port 8080 |
+| Frontend to sensitive service | Allowed | Denied | Denied | Hubble `DROPPED POLICY_DENIED`, identity 48469 to 1527, port 8080 |
 | Frontend to controlled exfil receiver | Received | Denied | Denied | Hubble `DROPPED POLICY_DENIED`, marker never reached the receiver |
 | Synthetic DNS marker to authoritative receiver | Received | Denied | Denied | client sees `REFUSED`; Hubble DNS-proxy drop; direct query to the receiver also dropped |
 | Frontend to forbidden backend HTTP operation | Allowed | Denied | Denied | client sees HTTP `403`; Hubble L7 `DROPPED POST /api/admin/export` |
+
+Two supplemental probes, both measured live:
+
+| Probe | Baseline | Hardened | Evidence |
+| ----- | -------- | -------- | -------- |
+| Pod reaches node instance metadata (`169.254.169.254`) | Allowed | Denied | Hubble `DROPPED POLICY_DENY`: the explicit `egressDeny`, not just default deny |
+| Pod reaches the public internet | Allowed | Denied | Hubble policy drop to the `world` identity |
+
+The metadata probe is a reachability check (the IMDSv2 token endpoint answers),
+the precondition for T1552.005. It never requests a credential path and the
+token is discarded unprinted. Network access is not credential theft.
 
 The attacker still executes commands after hardening. The RCE answers in all
 three columns; what changed is what those commands can reach.
 
 **Reschedule receipt.** After the hardened run, the frontend, API and database
-pods are replaced and each one moves to the other node. Every pod lands in a
-different pod CIDR with a new IP, keeps the same Cilium security identity
-(frontend `43953`, api `29076`, db `12880` in the reference run), and every row
-produces the same result, including the two legitimate flows, which cross
-nodes in both placements. That is the point of identity-based policy over
-IP-based rules.
+pods are replaced and each one moves to the other node. On EKS every pod got a
+new VPC address from a different ENI, kept the same Cilium security identity
+(frontend `48469`, api `10369`, db `6721`), and every row produced the same
+result, including the two legitimate flows, which cross nodes in both
+placements. That is the point of identity-based policy over IP-based rules.
 
-**Supplemental probes.** The public-internet probe goes Allowed to Denied with a
-policy drop to the `world` identity. The metadata probe (a reachability check for
-`169.254.169.254`, the precondition for T1552.005, not credential collection)
-reports `skipped` on kind because kind has no metadata service. It is measured
-on the live EKS run, never claimed from kind.
+**Same result locally.** The identical matrix passes on kind
+(`evidence/kind-reference/`), where the metadata probe reports `skipped`
+because kind has no metadata service. The runner refuses to claim a defense
+it could not first show was needed.
 
 ## Decisions
 
@@ -121,6 +131,19 @@ on the live EKS run, never claimed from kind.
   now moves every workload to the other node (a different pod CIDR, so the IP
   must change), waits for the old pods to be deleted, and skips pods with a
   deletion timestamp. The run fails unless both IP and node changed.
+- **On EKS, the node security group silently ate a scenario, and the runner
+  refused to call it a defense.** The first live run reported FAIL: the
+  baseline DNS marker never reached the receiver, so the hardened DNS row was
+  marked `skipped`, not `Denied`. Hubble showed CoreDNS's forwarded query
+  leaving node a and never arriving on node b. Under Cilium ENI IPAM, pod
+  addresses sit on ENIs that carry the *node* security group, and the EKS
+  module's recommended rules only open node-to-node TCP 1025-65535 and port 53.
+  The receiver listens on UDP 5353, so the VPC dropped it before Cilium ever
+  saw it. The fix is a self-referencing all-traffic rule on the node security
+  group, identical in both runs, so pod-to-pod filtering is left to the policy
+  under test. The failed run is kept in `evidence/eks-run1-fail/` as the
+  receipt. A naive harness would have shown that row as "Denied" in both
+  columns.
 - **A naive drop matcher would have over-claimed.** The first evidence matcher
   accepted any `DROPPED` L3/L4 flow. It now requires a policy drop reason
   (`POLICY_DENIED` or `POLICY_DENY`), because a drop for any other reason is not
@@ -145,14 +168,14 @@ plans): see [docs/runbook-aws.md](docs/runbook-aws.md).
 
 | Path | What it is |
 |------|------------|
-| `infra/` | VPC, EKS (two single-node groups), ECR, Cilium ENI IAM. Local state, isolated account |
+| `infra/` | VPC, EKS (two single-node groups), ECR, Cilium ENI IAM, node SG self rule. Local state, isolated account |
 | `cilium/` | Pinned Helm values (common, kind, EKS) and the readiness gate |
 | `kind/` | Local cluster config, default CNI disabled |
 | `app/` | One stdlib-only image for every role, plus the Kubernetes manifests |
 | `policy/baseline/` | Explicit allow-all `CiliumNetworkPolicy` per namespace |
 | `policy/hardened/` | Default deny, identity L3/L4, DNS proxy rule, L7 HTTP rule, metadata deny |
 | `scenarios/` | The runner and its unit tests |
-| `evidence/` | Reference reports and gzipped Hubble flows |
+| `evidence/` | Live EKS and kind reference reports, the failed first EKS run, gzipped Hubble flows |
 | `docs/` | ADRs, runbook, diagram source |
 
 Frameworks referenced: NSA/CISA Kubernetes Hardening Guidance (network

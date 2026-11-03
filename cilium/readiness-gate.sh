@@ -11,13 +11,25 @@ cilium status --wait --wait-duration 6m >/dev/null
 echo "readiness-gate: waiting for Hubble relay"
 kubectl -n kube-system rollout status deployment/hubble-relay --timeout=180s >/dev/null
 
-# Every non-host-network pod must have a CiliumEndpoint.
-unmanaged="$(kubectl get pods -A -o json | jq -r '
-  .items[] | select(.spec.hostNetwork != true) | select(.status.phase == "Running")
-  | "\(.metadata.namespace)/\(.metadata.name)"' | sort)"
-managed="$(kubectl get ciliumendpoints -A -o json | jq -r '
-  .items[] | "\(.metadata.namespace)/\(.metadata.name)"' | sort)"
-missing="$(comm -23 <(echo "$unmanaged") <(echo "$managed") | sed '/^$/d' || true)"
+# Every running, non-host-network pod must have a CiliumEndpoint. Terminating
+# pods are skipped, and a brand-new pod gets up to 60s to be picked up, so a
+# rollout in progress (CoreDNS right after the stub-zone restart) does not
+# fail the gate, but a pod that stays unmanaged does.
+unmanaged_pods() {
+  comm -23 \
+    <(kubectl get pods -A -o json | jq -r '
+        .items[] | select(.spec.hostNetwork != true) | select(.status.phase == "Running")
+        | select(.metadata.deletionTimestamp == null)
+        | "\(.metadata.namespace)/\(.metadata.name)"' | sort) \
+    <(kubectl get ciliumendpoints -A -o json | jq -r '
+        .items[] | "\(.metadata.namespace)/\(.metadata.name)"' | sort) | sed '/^$/d' || true
+}
+missing="$(unmanaged_pods)"
+for _ in $(seq 1 12); do
+  [[ -z "$missing" ]] && break
+  sleep 5
+  missing="$(unmanaged_pods)"
+done
 if [[ -n "$missing" ]]; then
   echo "readiness-gate: FAIL, pods not managed by Cilium:" >&2
   echo "$missing" >&2

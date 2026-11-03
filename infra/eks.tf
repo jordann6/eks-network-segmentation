@@ -25,6 +25,24 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
+  # Under Cilium ENI IPAM, pod addresses live on ENIs that carry the NODE
+  # security group, so that group is a filter on every cross-node pod-to-pod
+  # packet. The module's recommended rules only open node-to-node TCP
+  # 1025-65535 and 53/udp, which silently dropped the DNS receiver's UDP 5353 in
+  # the VPC before Cilium ever saw it (found on the first live run). Pod-to-pod
+  # filtering is the job of the policy under test, so the node group trusts
+  # itself on all ports, identically in both runs (ADR-0002).
+  node_security_group_additional_rules = {
+    ingress_self_all = {
+      description = "Node to node, all ports and protocols (pod-to-pod under Cilium ENI IPAM)"
+      protocol    = "-1"
+      from_port   = 0
+      to_port     = 0
+      type        = "ingress"
+      self        = true
+    }
+  }
+
   # Two single-node groups instead of one two-node group, so each node gets a
   # distinct lab.node/slot label. The manifests pin frontend + db to slot a and
   # api + sensitive to slot b, which makes the permitted chain cross nodes.

@@ -67,7 +67,7 @@ changing the hop limit mid-session.
 Save the evidence before tearing down:
 
 ```bash
-cp -r evidence/eks-reference evidence/eks-reference.keep   # flows + report
+ls evidence/eks-reference   # report.md, report.json, flows-*.jsonl.gz (committed)
 ```
 
 ## 4. Teardown
@@ -85,6 +85,13 @@ delete it by ID with `aws ec2 delete-network-interface` and re-run the
 destroy plan.
 
 ## Known sharp edges
+
+- Under ENI IPAM, pods carry the node security group. `infra/eks.tf` adds a
+  self-referencing all-traffic rule; without it, cross-node pod traffic on
+  ports the EKS module does not open (the DNS receiver's UDP 5353) is dropped
+  in the VPC and looks like a failed baseline.
+- The readiness gate retries for 60s, because CoreDNS restarts right after
+  the stub zone is written and its new pods need a moment to get endpoints.
 
 - `curl ifconfig.me` can return IPv6; the Makefile uses `curl -4`.
 - Strict DNS allowlists need `ndots:2` (already in the manifests; ADR-0004).

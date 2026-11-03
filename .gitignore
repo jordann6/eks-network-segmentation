@@ -27,5 +27,6 @@ evidence/*
 !evidence/README.md
 !evidence/kind-reference/
 !evidence/eks-reference/
-app/k8s/eks/
+!evidence/eks-run1-fail/
+app/k8s-eks/
 infra/destroy.tfplan
