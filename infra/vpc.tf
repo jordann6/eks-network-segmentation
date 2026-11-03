@@ -1,5 +1,13 @@
+# Pinned by name to the region's a and b zones, so the AZ set (and with it the
+# subnet layout) cannot silently change when AWS adds a zone. These are the two
+# zones the live run used.
 data "aws_availability_zones" "available" {
   state = "available"
+
+  filter {
+    name   = "zone-name"
+    values = ["${var.region}a", "${var.region}b"]
+  }
 }
 
 locals {
