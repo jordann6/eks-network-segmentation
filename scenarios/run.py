@@ -217,18 +217,54 @@ def _ep(flow: dict, side: str) -> dict:
     return flow.get(side) or {}
 
 
-def l34_drops(flows: list[dict], src_pod_prefix: str, dst: str) -> list[dict]:
-    """Hubble L3/L4 policy drops from the foothold to a destination (pod name
-    prefix or IP)."""
+def _l4(flow: dict) -> tuple[str, int | None]:
+    """(protocol, destination_port) from a flow's L4 block, or ("", None)."""
+    for proto, v in (flow.get("l4") or {}).items():
+        if isinstance(v, dict):
+            return proto.upper(), v.get("destination_port")
+    return "", None
+
+
+def _src_matches(f: dict, src_pod_prefix: str, src_ns: str) -> bool:
+    s = _ep(f, "source")
+    if not s.get("pod_name", "").startswith(src_pod_prefix):
+        return False
+    # Namespace pins the drop to the foothold's own identity, not any workload
+    # that merely shares a pod-name prefix. Cilium carries it on the endpoint and
+    # also as a k8s:io.kubernetes.pod.namespace label.
+    ns = s.get("namespace", "")
+    if not ns:
+        labels = s.get("labels", [])
+        ns = next((lbl.split("=", 1)[1] for lbl in labels
+                   if lbl.startswith("k8s:io.kubernetes.pod.namespace=")), "")
+    return ns == src_ns
+
+
+def l34_drops(flows: list[dict], src_pod_prefix: str, dst: str,
+              src_ns: str = "frontend", dst_port: int | None = None,
+              proto: str | None = None) -> list[dict]:
+    """Hubble L3/L4 policy drops from the foothold to a destination.
+
+    A flow counts only if it is a POLICY drop, from a pod with the foothold's
+    name prefix AND in the foothold's namespace, to the named destination (pod
+    name prefix or IP), and — when given — on the expected protocol and port. The
+    identity, destination and port together stop an unrelated drop from standing
+    in as evidence for this row.
+    """
     out = []
     for f in flows:
         if f.get("verdict") != "DROPPED":
             continue
-        if not _ep(f, "source").get("pod_name", "").startswith(src_pod_prefix):
+        if not _src_matches(f, src_pod_prefix, src_ns):
             continue
         dpod = _ep(f, "destination").get("pod_name", "")
         dip = (f.get("IP") or {}).get("destination", "")
         if not (dpod.startswith(dst) or dip == dst):
+            continue
+        fproto, fport = _l4(f)
+        if dst_port is not None and fport != dst_port:
+            continue
+        if proto is not None and fproto != proto.upper():
             continue
         # POLICY_DENIED (default deny) or POLICY_DENY (explicit egressDeny).
         # Any other drop reason is not evidence that policy did the work.
@@ -237,21 +273,61 @@ def l34_drops(flows: list[dict], src_pod_prefix: str, dst: str) -> list[dict]:
     return out
 
 
-def l7_http_drops(flows: list[dict], method: str, path: str) -> list[dict]:
-    return [
-        f for f in flows
-        if f.get("verdict") == "DROPPED"
-        and ((f.get("l7") or {}).get("http") or {}).get("method") == method
-        and path in ((f.get("l7") or {}).get("http") or {}).get("url", "")
-    ]
+def l7_http_drops(flows: list[dict], method: str, path: str,
+                  src_pod_prefix: str = "frontend-", src_ns: str = "frontend",
+                  dst_pod_prefix: str = "api-", dst_ns: str = "backend",
+                  dst_port: int | None = 8080) -> list[dict]:
+    """L7 HTTP policy drops for one method+path, pinned to the foothold identity
+    and the real destination workload, not just any dropped request anywhere."""
+    out = []
+    for f in flows:
+        if f.get("verdict") != "DROPPED":
+            continue
+        http = (f.get("l7") or {}).get("http") or {}
+        if http.get("method") != method or path not in http.get("url", ""):
+            continue
+        if not _src_matches(f, src_pod_prefix, src_ns):
+            continue
+        d = _ep(f, "destination")
+        if not d.get("pod_name", "").startswith(dst_pod_prefix):
+            continue
+        if dst_ns and d.get("namespace", "") not in ("", dst_ns):
+            continue
+        _, fport = _l4(f)
+        if dst_port is not None and fport not in (None, dst_port):
+            continue
+        # An L7 HTTP drop is the proxy's own verdict: Hubble records it as
+        # verdict=DROPPED with no drop_reason_desc (the reason field is for the
+        # datapath L3/L4 drops). So the DROPPED verdict on the matched
+        # method+path+identity is the enforcement evidence; we do not demand a
+        # "POLICY" reason here, because the proxy never sets one.
+        out.append(f)
+    return out
 
 
-def dns_proxy_drops(flows: list[dict], marker: str) -> list[dict]:
-    return [
-        f for f in flows
-        if f.get("verdict") == "DROPPED"
-        and marker in (((f.get("l7") or {}).get("dns") or {}).get("query", ""))
-    ]
+def dns_proxy_drops(flows: list[dict], marker: str,
+                    src_pod_prefix: str = "frontend-", src_ns: str = "frontend") -> list[dict]:
+    """DNS-proxy drops for this run's marker query, from the foothold identity.
+
+    Like L7 HTTP, a DNS-proxy denial is recorded as verdict=DROPPED with no
+    drop_reason_desc, so the marker query + foothold identity + DROPPED verdict
+    is the evidence. The per-run marker is what ties the drop to this probe.
+    """
+    if not marker:
+        # No per-run marker means no way to tie a drop to this probe. Return
+        # nothing rather than let an empty substring match every DNS drop.
+        return []
+    out = []
+    for f in flows:
+        if f.get("verdict") != "DROPPED":
+            continue
+        dns = (f.get("l7") or {}).get("dns") or {}
+        if marker not in dns.get("query", ""):
+            continue
+        if not _src_matches(f, src_pod_prefix, src_ns):
+            continue
+        out.append(f)
+    return out
 
 
 def exemplar(f: dict) -> dict:
@@ -405,17 +481,21 @@ def evidence_for(sid: str, res: dict, flows: list[dict]) -> list[dict]:
     if sid == "forbidden-http":
         return l7_http_drops(w, "POST", "/api/admin/export")
     if sid == "dns-exfil":
-        return dns_proxy_drops(w, res["marker"]) + l34_drops(w, "frontend-", "dns-")
+        return (dns_proxy_drops(w, res["marker"])
+                + l34_drops(w, "frontend-", "dns-", dst_port=53, proto="UDP"))
     if sid == "internet-egress":
         return [f for f in w if f.get("verdict") == "DROPPED"
-                and _ep(f, "source").get("pod_name", "").startswith("frontend-")
+                and _src_matches(f, "frontend-", "frontend")
                 and "POLICY" in f.get("drop_reason_desc", "")
                 and "world" in " ".join(_ep(f, "destination").get("labels", []))]
-    return l34_drops(w, "frontend-", res.get("dst", ""))
+    # L3/L4 attack rows carry a known destination port on TCP.
+    port = {"frontend-to-sensitive": 8080, "http-exfil": 8080, "metadata": 80}.get(sid)
+    return l34_drops(w, "frontend-", res.get("dst", ""), dst_port=port, proto="TCP")
 
 
 def classify(sid: str, kind: str, layer: str, profile: str, res: dict,
-             evidence: list[dict], baseline_status: str | None) -> tuple[str, str]:
+             evidence: list[dict], baseline_status: str | None,
+             collection_gap: bool = False) -> tuple[str, str]:
     if not res.get("healthy"):
         return "error", "destination failed its in-pod health check at probe time"
     if kind == "legit":
@@ -435,6 +515,11 @@ def classify(sid: str, kind: str, layer: str, profile: str, res: dict,
         return "error", "L7 drop recorded but the client did not see HTTP 403"
     if sid == "dns-exfil" and res["client"].get("resolver_status") != "REFUSED":
         return "error", "DNS-proxy drop recorded but the client did not see REFUSED"
+    if collection_gap:
+        # Hubble reported lost events during the run. We found a matching drop,
+        # but with telemetry gaps we cannot certify that no flow also slipped
+        # through, so we do not claim a defense. Honest error, never a pass.
+        return "error", "enforcement evidence found but Hubble reported lost events in the run; cannot certify the drop is complete"
     return "blocked", f"denied with {layer} enforcement evidence ({len(evidence)} matching flows)"
 
 
@@ -474,7 +559,8 @@ def run_profile(name: str, run_id: str, baseline: dict | None, outdir: Path) -> 
         if rce_ok.get("rc") != 0:
             status, why = "error", "planted RCE did not answer; foothold unavailable"
         else:
-            status, why = classify(sid, kind, layer, name, res, ev, b_status)
+            status, why = classify(sid, kind, layer, name, res, ev, b_status,
+                                   collection_gap=lost > 0)
         expected = exp_b if name == "baseline" else exp_h
         shown = display(kind, status, exp_h, res)
         results[sid] = {

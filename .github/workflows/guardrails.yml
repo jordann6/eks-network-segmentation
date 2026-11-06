@@ -18,14 +18,29 @@ permissions:
 
 jobs:
   static:
-    uses: jordann6/platform-guardrails/.github/workflows/tf-ci.yml@8eb9a745e4297682a4e8a5478c363280d6605ff5 # v1.9.1
+    uses: jordann6/platform-guardrails/.github/workflows/tf-ci.yml@6006053c9d3fade137a29bac56d6c0d621edcc75 # v1.10.0
     with:
       terraform_dir: infra
-      guardrails_ref: 8eb9a745e4297682a4e8a5478c363280d6605ff5
+      guardrails_ref: 6006053c9d3fade137a29bac56d6c0d621edcc75
       # The only accepted Checkov finding is CKV_TF_1 (registry modules pinned
       # by version range, not commit hash), the same exception the sibling
       # repos carry. This lab is not vulnerable at the infra layer.
       checkov_baseline: infra/.checkov.baseline
+
+  # The runner's honesty rules and evidence matchers are pure and unit-tested.
+  # Keep them green so a loose matcher can never again accept an unrelated drop
+  # as evidence, and a lost-telemetry run can never read as a pass.
+  unit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: cd scenarios && python3 -m unittest -v test_classify test_matchers
 
   # The FinOps allocation policy (finops.rego) already runs inside `static`
   # above, because tf-ci.yml evaluates the whole shared policy/ directory. So
@@ -37,7 +52,7 @@ jobs:
   # Uncomment once it does:
   #
   # finops:
-  #   uses: jordann6/platform-guardrails/.github/workflows/finops-gate.yml@8eb9a745e4297682a4e8a5478c363280d6605ff5 # v1.9.1
+  #   uses: jordann6/platform-guardrails/.github/workflows/finops-gate.yml@6006053c9d3fade137a29bac56d6c0d621edcc75 # v1.10.0
   #   permissions:
   #     contents: read
   #     pull-requests: write
@@ -45,6 +60,6 @@ jobs:
   #     terraform_dir: infra
   #     max_monthly_increase: "50"   # USD/month a PR may add before it fails
   #     fail_on_cost: true           # false = comment only
-  #     guardrails_ref: 8eb9a745e4297682a4e8a5478c363280d6605ff5
+  #     guardrails_ref: 6006053c9d3fade137a29bac56d6c0d621edcc75
   #   secrets:
   #     INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}

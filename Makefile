@@ -68,8 +68,8 @@ hardened: ## Apply only the hardened policy (manual exploration)
 	kubectl apply -f policy/hardened
 
 .PHONY: test
-test: ## Unit-test the runner's honesty rules (no cluster needed)
-	cd scenarios && python3 -m unittest -v test_classify
+test: ## Unit-test the runner's honesty rules + evidence matchers (no cluster needed)
+	cd scenarios && python3 -m unittest -v test_classify test_matchers
 
 # --- EKS (one bounded live session) ----------------------------------------
 # The credentialed apply and destroy are run by the operator from the saved
