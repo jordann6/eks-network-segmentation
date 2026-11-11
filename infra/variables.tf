@@ -44,9 +44,9 @@ variable "cluster_public_access_cidrs" {
 }
 
 variable "cluster_version" {
-  description = "EKS Kubernetes version. Pinned to a standard-support version Cilium 1.20 supports."
+  description = "EKS Kubernetes version. Standard-support version that Cilium 1.20 supports."
   type        = string
-  default     = "1.34"
+  default     = "1.36"
 }
 
 variable "node_instance_type" {

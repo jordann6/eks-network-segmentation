@@ -46,8 +46,11 @@ kind-down: ## Delete the kind cluster
 .PHONY: app
 app: ## Deploy the four-namespace topology and receivers (refuses to run before the readiness gate passes)
 	cilium/readiness-gate.sh
-	@if [[ -f app/k8s-eks/kustomization.yaml && "$$(kubectl config current-context)" != kind-* ]]; then \
-		kubectl apply -k app/k8s-eks; else kubectl apply -k app/k8s; fi
+	@ctx="$$(kubectl config current-context)"; \
+	if [[ "$$ctx" == kind-* ]]; then kubectl apply -k app/k8s; \
+	elif [[ "$$ctx" == netseg-aks ]]; then kubectl apply -k app/k8s-aks; \
+	elif [[ -f app/k8s-eks/kustomization.yaml ]]; then kubectl apply -k app/k8s-eks; \
+	else kubectl apply -k app/k8s; fi
 	for ns in frontend backend sensitive egress-sim; do \
 		kubectl -n $$ns rollout status deploy --timeout=180s; done
 	scripts/coredns-stub.sh
@@ -68,8 +71,8 @@ hardened: ## Apply only the hardened policy (manual exploration)
 	kubectl apply -f policy/hardened
 
 .PHONY: test
-test: ## Unit-test the runner's honesty rules (no cluster needed)
-	cd scenarios && python3 -m unittest -v test_classify
+test: ## Unit-test the runner's honesty rules + evidence matchers (no cluster needed)
+	cd scenarios && python3 -m unittest -v test_classify test_matchers test_azure
 
 # --- EKS (one bounded live session) ----------------------------------------
 # The credentialed apply and destroy are run by the operator from the saved
@@ -123,6 +126,63 @@ eks-verify-gone: ## Confirm nothing hourly survived: no cluster, no NAT gateway,
 	echo "lab ENIs:   $$(aws ec2 describe-network-interfaces --region $$r --filters Name=tag:cilium-managed,Values=true --query 'NetworkInterfaces[].NetworkInterfaceId' --output text)"; \
 	echo "(all three empty = nothing left running)"
 
+# --- AKS (one bounded live session, ADR-0006) -------------------------------
+# Same flow as EKS. The credentialed apply and destroy are run by the operator
+# from the saved plans these print. Needs az, kubelogin, terraform; the
+# subscription id lives in infra/azure/lab.auto.tfvars (gitignored).
+TFA := terraform -chdir=infra/azure
+
+.PHONY: aks-plan
+aks-plan: ## Write infra/azure/tfplan (API scoped to your IPv4 /32) and print the apply command
+	$(TFA) init -input=false
+	$(TFA) plan -input=false -out=tfplan \
+		-var='api_authorized_cidrs=["'"$$(curl -4 -s ifconfig.me)"'/32"]'
+	@echo; echo "Read the plan, then run:  terraform -chdir=$(CURDIR)/infra/azure apply $(CURDIR)/infra/azure/tfplan"
+
+.PHONY: cilium-aks
+cilium-aks: ## Point kubectl at AKS, install Cilium (BYO CNI), gate, and confirm the server version
+	eval "$$($(TFA) output -raw configure_kubectl)"
+	helm repo add cilium https://helm.cilium.io/ >/dev/null 2>&1 || true
+	helm repo update cilium >/dev/null
+	helm upgrade --install cilium cilium/cilium --version $(CILIUM_VERSION) -n kube-system \
+		-f cilium/values-common.yaml -f cilium/values-aks.yaml
+	cilium/readiness-gate.sh
+	@echo "server version (must be the 1.36 default, ADR-0006 decision 5):"; \
+	kubectl version -o json | jq -r '.serverVersion.gitVersion'
+
+.PHONY: aks-image
+aks-image: ## Build in ACR (no local push), write the AKS kustomize overlay with the git-SHA tag
+	$(eval ACR := $(shell $(TFA) output -raw acr_name))
+	$(eval ACR_HOST := $(shell $(TFA) output -raw acr_login_server))
+	az acr build --registry $(ACR) --image netseg/lab:$(IMAGE_TAG) --platform linux/amd64 app
+	mkdir -p app/k8s-aks
+	printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - ../k8s\nimages:\n  - name: netseg-lab\n    newName: %s/netseg/lab\n    newTag: "%s"\n' \
+		"$(ACR_HOST)" "$(IMAGE_TAG)" > app/k8s-aks/kustomization.yaml
+
+.PHONY: demo-aks
+demo-aks: ## Run the matrix on AKS (Azure IMDS probe plus the wire server row), nothing else touching the cluster
+	python3 scenarios/run.py --cloud azure $(if $(RUN_ID),--run-id $(RUN_ID),)
+
+.PHONY: aks-destroy-plan
+aks-destroy-plan: ## Remove workloads (Cilium stays), then write infra/azure/destroy.tfplan and print the destroy command
+	-kubectl delete -k app/k8s-aks --ignore-not-found --wait=true
+	# Cilium is NOT uninstalled here. On 11/11 removing it first left replacement
+	# system pods without a CNI (ContainerCreating), so the pool drain could not
+	# evict metrics-server without breaking its PDB and the destroy failed after
+	# the 10 minute drain timeout. The cluster is destroyed next, so there is
+	# nothing to gain from removing the CNI.
+	$(TFA) plan -destroy -input=false -out=destroy.tfplan \
+		-var='api_authorized_cidrs=["'"$$(curl -4 -s ifconfig.me)"'/32"]'
+	@echo; echo "Read the plan, then run:  terraform -chdir=$(CURDIR)/infra/azure apply $(CURDIR)/infra/azure/destroy.tfplan"
+	@echo "Then:  make aks-verify-gone"
+
+.PHONY: aks-verify-gone
+aks-verify-gone: ## Confirm nothing hourly survived: no cluster, node RG, registry or lab resource group
+	@echo "resource groups: $$(az group list --query "[?starts_with(name, 'rg-netseg')].name" -o tsv)"; \
+	echo "aks clusters:    $$(az aks list --query "[?name=='netseg'].name" -o tsv)"; \
+	echo "registries:      $$(az acr list --query "[?starts_with(name, 'acrnetseg')].name" -o tsv)"; \
+	echo "(all three empty = nothing left running)"
+
 # --- local gates (platform-guardrails equivalents) --------------------------
 
 .PHONY: check
@@ -133,4 +193,9 @@ check: ## Static checks: fmt, validate, tflint, checkov (baseline), trivy, conft
 	checkov -d infra --framework terraform --quiet --compact --baseline infra/.checkov.baseline
 	trivy config --severity CRITICAL,HIGH --exit-code 1 --skip-dirs infra/.terraform infra
 	conftest test --parser hcl2 --combine --policy ../platform-guardrails/policy infra/*.tf
+	$(TFA) fmt -check -recursive
+	$(TFA) init -backend=false -input=false >/dev/null && $(TFA) validate
+	tflint --chdir=infra/azure --recursive --minimum-failure-severity=error
+	checkov -d infra/azure --framework terraform --quiet --compact
+	trivy config --severity CRITICAL,HIGH --exit-code 1 --skip-dirs infra/azure/.terraform infra/azure
 	$(MAKE) test
