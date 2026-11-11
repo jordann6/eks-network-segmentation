@@ -57,6 +57,11 @@ EXFIL_ZONE = "exfil.lab.test"
 SENSITIVE_MARKER = "SYNTHETIC-SENSITIVE-RECORD"
 EXPORT_MARKER = "SYNTHETIC-BULK-EXPORT"
 IMDS = "169.254.169.254"
+# Azure only (ADR-0006): the platform wire server is probed as its own row so
+# its result is never folded into the IMDS verdict.
+WIRESERVER = "168.63.129.16"
+AZURE_IMDS_PATH = "/metadata/instance?api-version=2021-02-01"
+CLOUD = "aws"  # "aws" (also what kind uses, where the probe reports skipped) or "azure"
 INTERNET_PROBE = "https://example.com/"
 FOOTHOLD_SA = "system:serviceaccount:frontend:frontend"
 
@@ -371,6 +376,25 @@ SCENARIOS = [
     ("internet-egress", "Frontend to public internet (example.com:443)", "attack", "L3/L4", False, "Allowed", "Denied"),
 ]
 
+# Rows that exist only on a given cloud. Kept out of SCENARIOS so the kind and
+# EKS matrices, evidence and expectations are unchanged (ADR-0006).
+AZURE_ONLY_SCENARIOS = [
+    ("wireserver", "Frontend reaches the Azure wire server (168.63.129.16, finding)", "attack", "L3/L4", False, "Allowed", "Denied"),
+]
+
+
+def set_cloud(cloud: str) -> None:
+    """Select the cloud-specific probes and rows. Idempotent."""
+    global CLOUD
+    if cloud not in ("aws", "azure"):
+        raise ValueError(f"unknown cloud {cloud!r}")
+    CLOUD = cloud
+    for row in AZURE_ONLY_SCENARIOS:
+        if cloud == "azure" and row not in SCENARIOS:
+            SCENARIOS.append(row)
+        if cloud != "azure" and row in SCENARIOS:
+            SCENARIOS.remove(row)
+
 
 class Profile:
     def __init__(self, name: str, run_id: str, pf: PortForward, baseline: dict | None) -> None:
@@ -449,15 +473,27 @@ class Profile:
                 "client": {"rc": r["rc"], "http_code": code.strip(), "body": body.strip()[:60]}}
 
     def p_metadata(self) -> dict:
-        # Reachability only. The IMDSv2 token request proves the endpoint answers
-        # from the pod network; the token itself is discarded (-o /dev/null) and
-        # no credential path is ever requested. Network access != credential theft.
-        r = self.pf.rce(
-            f"curl -s -m 4 -o /dev/null -w '%{{http_code}}' -X PUT http://{IMDS}/latest/api/token "
-            "-H 'X-aws-ec2-metadata-token-ttl-seconds: 60'")
+        # Reachability only. The request proves the endpoint answers from the pod
+        # network; the body is discarded (-o /dev/null) and no credential or
+        # token path is ever requested. Network access != credential theft.
+        if CLOUD == "azure":
+            cmd = (f"curl -s -m 4 -o /dev/null -w '%{{http_code}}' "
+                   f"-H 'Metadata: true' http://{IMDS}{AZURE_IMDS_PATH}")
+        else:
+            cmd = (f"curl -s -m 4 -o /dev/null -w '%{{http_code}}' -X PUT http://{IMDS}/latest/api/token "
+                   "-H 'X-aws-ec2-metadata-token-ttl-seconds: 60'")
+        r = self.pf.rce(cmd)
         return {"healthy": True, "reached": r["stdout"].strip() == "200", "dst": IMDS,
                 "environmental": True,
                 "client": {"rc": r["rc"], "http_code": r["stdout"].strip()}}
+
+    def p_wireserver(self) -> dict:
+        # Reachability only (Azure). Any HTTP status means the path to the wire
+        # server is open; 000 means no connection. The body is discarded.
+        r = self.pf.rce(f"curl -s -m 4 -o /dev/null -w '%{{http_code}}' http://{WIRESERVER}/?comp=versions")
+        code = r["stdout"].strip()
+        return {"healthy": True, "reached": code not in ("", "000"), "dst": WIRESERVER,
+                "environmental": True, "client": {"rc": r["rc"], "http_code": code}}
 
     def p_internet_egress(self) -> dict:
         r = self.pf.rce(f"curl -s -m 6 -o /dev/null -w '%{{http_code}}' {INTERNET_PROBE}")
@@ -489,7 +525,7 @@ def evidence_for(sid: str, res: dict, flows: list[dict]) -> list[dict]:
                 and "POLICY" in f.get("drop_reason_desc", "")
                 and "world" in " ".join(_ep(f, "destination").get("labels", []))]
     # L3/L4 attack rows carry a known destination port on TCP.
-    port = {"frontend-to-sensitive": 8080, "http-exfil": 8080, "metadata": 80}.get(sid)
+    port = {"frontend-to-sensitive": 8080, "http-exfil": 8080, "metadata": 80, "wireserver": 80}.get(sid)
     return l34_drops(w, "frontend-", res.get("dst", ""), dst_port=port, proto="TCP")
 
 
@@ -585,6 +621,10 @@ def apply_policy(profile: str) -> None:
     for ns in LAB_NAMESPACES:
         kubectl("-n", ns, "delete", "ciliumnetworkpolicies,networkpolicies", "--all", "--wait=true", timeout=60)
     kubectl("apply", "-f", str(ROOT / "policy" / profile), check=True)
+    if CLOUD == "azure" and profile == "hardened":
+        # Explicit wire-server deny on top of default deny (deny wins over any
+        # broader allow added later), the same belt and braces as the metadata deny.
+        kubectl("apply", "-f", str(ROOT / "policy" / "azure-hardened"), check=True)
     # Policy is realized asynchronously per endpoint, so give the agents a fixed
     # settle time. An unrealized policy cannot produce a false "blocked": the
     # classifier demands matching enforcement evidence, and the legitimate flows
@@ -688,9 +728,14 @@ def write_report(outdir: Path, doc: dict) -> None:
         b, h, r = (P[x]["results"][sid] for x in ("baseline", "hardened", "reschedule"))
         L.append(f"| {title} | {b['observed']} | {h['observed']} | {r['observed']} | {evidence_cell(h)} |")
     L.append("\n## Supplemental probes\n")
-    L.append("Environment dependent: on kind there is no instance metadata service, so the "
-             "metadata probe reports `skipped` rather than a false \"defended\". The live EKS "
-             "run is where it is measured.\n")
+    if CLOUD == "azure":
+        L.append("Environment dependent: the metadata probe is the Azure IMDS reachability "
+                 "check and the wire server probe is a separate row. Both are measured here "
+                 "(AKS has both endpoints). Host network pods are not covered by pod policy.\n")
+    else:
+        L.append("Environment dependent: on kind there is no instance metadata service, so the "
+                 "metadata probe reports `skipped` rather than a false \"defended\". The live EKS "
+                 "run is where it is measured.\n")
     L.append("| Probe | Baseline | Hardened | After reschedule | Reason (hardened) |")
     L.append("| ----- | -------- | -------- | ---------------- | ----------------- |")
     for sid, title, kind, layer, matrix, *_ in SCENARIOS:
@@ -755,7 +800,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run-id", default=now().strftime("%Y%m%dT%H%M%SZ"))
     ap.add_argument("--out", default=str(ROOT / "evidence"))
+    ap.add_argument("--cloud", choices=["aws", "azure"], default="aws",
+                    help="selects the metadata probe and Azure-only rows (ADR-0006); kind uses aws")
     args = ap.parse_args()
+    set_cloud(args.cloud)
     for tool in ("kubectl", "hubble", "cilium"):
         if not shutil.which(tool):
             print(f"missing {tool} on PATH", file=sys.stderr)
@@ -795,7 +843,7 @@ def main() -> int:
           and all(r["pass"] for p in profiles for r in p["results"].values())
           and ips_changed and nodes_changed and ids_stable and identical)
     doc = {
-        "run_id": args.run_id, "context": ctx, "started": iso(started), "finished": iso(now()),
+        "run_id": args.run_id, "cloud": args.cloud, "context": ctx, "started": iso(started), "finished": iso(now()),
         "pass": ok, "preconditions": pc, "profiles": profiles,
         "reschedule": {"before": before, "after": after, "ips_changed": ips_changed,
                        "nodes_changed": nodes_changed,

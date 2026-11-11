@@ -1,0 +1,2 @@
+# Copy to lab.auto.tfvars (gitignored). The subscription ID never goes in git.
+subscription_id = "00000000-0000-0000-0000-000000000000"
