@@ -33,3 +33,5 @@ app/k8s-eks/
 infra/destroy.tfplan
 *.tfplan
 app/k8s-aks/
+!evidence/aks-phase1/
+!evidence/aks-phase1b/
