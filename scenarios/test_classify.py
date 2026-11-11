@@ -69,6 +69,25 @@ class Classify(unittest.TestCase):
     def test_error_never_displays_as_denied(self):
         self.assertEqual(display("attack", "error", "Denied", {}), "error")
 
+    def test_collection_gap_turns_blocked_into_error(self):
+        # Lost telemetry during the run: a matched drop is no longer enough to
+        # certify a defense, so the verdict must be error, not a pass.
+        s, why = classify("frontend-to-sensitive", "attack", "L3/L4", "hardened",
+                          res(), DROP, "exploitable", collection_gap=True)
+        self.assertEqual(s, "error")
+        self.assertIn("lost events", why)
+
+    def test_collection_gap_does_not_downgrade_exploitable(self):
+        # A reached flow is still exploitable even with a collection gap.
+        s, _ = classify("http-exfil", "attack", "L3/L4", "hardened",
+                        res(reached=True), DROP, "exploitable", collection_gap=True)
+        self.assertEqual(s, "exploitable")
+
+    def test_no_gap_still_blocked(self):
+        s, _ = classify("frontend-to-sensitive", "attack", "L3/L4", "hardened",
+                        res(), DROP, "exploitable", collection_gap=False)
+        self.assertEqual(s, "blocked")
+
 
 if __name__ == "__main__":
     unittest.main()

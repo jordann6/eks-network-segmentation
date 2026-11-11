@@ -28,5 +28,10 @@ evidence/*
 !evidence/kind-reference/
 !evidence/eks-reference/
 !evidence/eks-run1-fail/
+!evidence/eks-phase1/
 app/k8s-eks/
 infra/destroy.tfplan
+*.tfplan
+app/k8s-aks/
+!evidence/aks-phase1/
+!evidence/aks-phase1b/

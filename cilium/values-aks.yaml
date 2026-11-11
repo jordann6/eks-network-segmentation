@@ -1,0 +1,25 @@
+# AKS: bring your own CNI (ADR-0006). The cluster is created with
+# network_plugin "none", so its nodes stay NotReady until this release installs.
+# Only IPAM and routing differ from kind and EKS; the policy engine, L7 proxy,
+# DNS proxy (REFUSED) and Hubble settings come unchanged from values-common.yaml.
+# Same shape as the self-healing lab's proven AKS values (its ADR-0007 row 1),
+# chart 1.20.4 facts:
+#   - aksbyocni.enabled is the one required AKS switch
+#   - with aksbyocni the chart writes "ipam: cluster-pool" only for cluster-pool
+#   - the default pool (10.0.0.0/8) overlaps the lab VNet, so the pool is set to
+#     the pod CIDR given to AKS (infra/azure/network.tf), clear of the services
+#   - the chart refuses any routingMode but tunnel with aksbyocni
+aksbyocni:
+  enabled: true
+ipam:
+  mode: cluster-pool
+  operator:
+    clusterPoolIPv4PodCIDRList: ["10.244.0.0/16"]
+    clusterPoolIPv4MaskSize: 24
+routingMode: tunnel
+tunnelProtocol: vxlan
+# AKS installs kube-proxy with BYOCNI; Cilium runs beside it (the chart default,
+# stated so a later default change cannot surprise a run).
+kubeProxyReplacement: "false"
+# Pods leaving the node are masqueraded to the node address.
+enableIPv4Masquerade: true
