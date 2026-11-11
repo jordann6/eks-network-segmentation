@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Unit tests
-        run: cd scenarios && python3 -m unittest -v test_classify test_matchers
+        run: cd scenarios && python3 -m unittest -v test_classify test_matchers test_azure
 
   # The FinOps allocation policy (finops.rego) already runs inside `static`
   # above, because tf-ci.yml evaluates the whole shared policy/ directory. So

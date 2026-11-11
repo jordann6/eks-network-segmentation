@@ -1,0 +1,38 @@
+# AKS only (ADR-0006). Default deny already drops the Azure wire server for the
+# lab pods; an explicit egressDeny survives a future allow rule that is broader
+# than meant (deny always wins over allow in Cilium), the same belt and braces
+# as the metadata deny in the base hardened set. Lab workloads have no reason to
+# talk to the platform wire server; CoreDNS (kube-system, not selected here)
+# keeps reaching Azure DNS on its own.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: wireserver-deny
+  namespace: frontend
+spec:
+  endpointSelector: {}
+  egressDeny:
+    - toCIDR:
+        - 168.63.129.16/32
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: wireserver-deny
+  namespace: backend
+spec:
+  endpointSelector: {}
+  egressDeny:
+    - toCIDR:
+        - 168.63.129.16/32
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: wireserver-deny
+  namespace: sensitive
+spec:
+  endpointSelector: {}
+  egressDeny:
+    - toCIDR:
+        - 168.63.129.16/32

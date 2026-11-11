@@ -31,3 +31,4 @@ evidence/*
 !evidence/eks-phase1/
 app/k8s-eks/
 infra/destroy.tfplan
+*.tfplan
