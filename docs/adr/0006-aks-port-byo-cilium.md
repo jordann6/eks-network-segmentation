@@ -136,3 +136,15 @@ under the managed CNI, or if ACNS L7 and FQDN are shown to compose in one
 policy. Evidence to collect for a re-decision would be a kind-equivalent run of
 the six rows on managed Cilium, recorded as a separate comparison and not
 substituted for the BYO result.
+
+## Amendment 2026-11-11, found in the live session
+
+The drain timeout in decision 8 bounded a teardown failure but did not prevent
+it. `make aks-destroy-plan` uninstalled Cilium before the destroy, so
+replacement system pods had no CNI and stayed in ContainerCreating. Pool `b`
+could not drain because `metrics-server` and CoreDNS carry PDBs with zero
+allowed disruptions, and the destroy failed after the 10 minute timeout with a
+KubernetesAPICallFailed drain error. The fix is that teardown no longer removes
+Cilium before the cluster goes. Recovery for the stuck run was to delete the two
+kube-system PDBs and re-plan, since the saved destroy plan goes stale after a
+partial apply.
