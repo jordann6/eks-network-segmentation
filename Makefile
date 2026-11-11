@@ -164,9 +164,13 @@ demo-aks: ## Run the matrix on AKS (Azure IMDS probe plus the wire server row), 
 	python3 scenarios/run.py --cloud azure $(if $(RUN_ID),--run-id $(RUN_ID),)
 
 .PHONY: aks-destroy-plan
-aks-destroy-plan: ## Remove workloads + Cilium, then write infra/azure/destroy.tfplan and print the destroy command
+aks-destroy-plan: ## Remove workloads (Cilium stays), then write infra/azure/destroy.tfplan and print the destroy command
 	-kubectl delete -k app/k8s-aks --ignore-not-found --wait=true
-	-helm uninstall cilium -n kube-system --wait
+	# Cilium is NOT uninstalled here. On 11/11 removing it first left replacement
+	# system pods without a CNI (ContainerCreating), so the pool drain could not
+	# evict metrics-server without breaking its PDB and the destroy failed after
+	# the 10 minute drain timeout. The cluster is destroyed next, so there is
+	# nothing to gain from removing the CNI.
 	$(TFA) plan -destroy -input=false -out=destroy.tfplan \
 		-var='api_authorized_cidrs=["'"$$(curl -4 -s ifconfig.me)"'/32"]'
 	@echo; echo "Read the plan, then run:  terraform -chdir=$(CURDIR)/infra/azure apply $(CURDIR)/infra/azure/destroy.tfplan"
