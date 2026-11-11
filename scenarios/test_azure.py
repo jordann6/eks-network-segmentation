@@ -140,5 +140,24 @@ class TestWireserverVerdicts(unittest.TestCase):
         self.assertEqual(status, "exploitable")
 
 
+class TestRbacDenied(unittest.TestCase):
+    def test_plain_no_is_denial(self):
+        self.assertTrue(run.rbac_denied("no"))
+
+    def test_azure_rbac_no_with_reason_is_denial(self):
+        self.assertTrue(run.rbac_denied("no - Azure does not have opinion for this user."))
+
+    def test_yes_is_not_denial(self):
+        self.assertFalse(run.rbac_denied("yes"))
+
+    def test_empty_or_error_is_not_denial(self):
+        for a in ("", "  ", "error: connection refused", "Error from server (Forbidden)"):
+            self.assertFalse(run.rbac_denied(a), a)
+
+    def test_prefix_lookalike_is_not_denial(self):
+        self.assertFalse(run.rbac_denied("nope"))
+        self.assertFalse(run.rbac_denied("not allowed"))
+
+
 if __name__ == "__main__":
     unittest.main()
