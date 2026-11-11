@@ -141,7 +141,7 @@ aks-plan: ## Write infra/azure/tfplan (API scoped to your IPv4 /32) and print th
 
 .PHONY: cilium-aks
 cilium-aks: ## Point kubectl at AKS, install Cilium (BYO CNI), gate, and confirm the server version
-	$$($(TFA) output -raw configure_kubectl)
+	eval "$$($(TFA) output -raw configure_kubectl)"
 	helm repo add cilium https://helm.cilium.io/ >/dev/null 2>&1 || true
 	helm repo update cilium >/dev/null
 	helm upgrade --install cilium cilium/cilium --version $(CILIUM_VERSION) -n kube-system \
