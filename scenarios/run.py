@@ -632,6 +632,16 @@ def apply_policy(profile: str) -> None:
     time.sleep(8)
 
 
+def rbac_denied(answer: str) -> bool:
+    """True only for a denial. `kubectl auth can-i` prints `no`, and on AKS with
+    Azure RBAC for Kubernetes it prints `no - Azure does not have opinion for this
+    user.` (the Azure authorizer abstained, Kubernetes RBAC then said no). Both
+    are denials. Anything else, including an empty answer from a failed call, is
+    not a denial, so a broken probe can never read as least privilege."""
+    a = answer.strip().lower()
+    return a == "no" or a.startswith("no - ")
+
+
 def preconditions() -> dict:
     checks = {}
     st = sh(["cilium", "status", "--wait", "--wait-duration", "2m"], timeout=180)
@@ -653,7 +663,7 @@ def preconditions() -> dict:
         out = kubectl("auth", "can-i", *args, f"--as={FOOTHOLD_SA}").stdout.strip()
         rbac[label] = out
     checks["foothold_rbac"] = rbac
-    checks["foothold_rbac_minimal"] = all(v == "no" for v in rbac.values())
+    checks["foothold_rbac_minimal"] = all(rbac_denied(v) for v in rbac.values())
     with PortForward() as pf:
         tok = pf.rce("test -e /var/run/secrets/kubernetes.io/serviceaccount/token && echo mounted || echo absent")
         checks["foothold_token"] = tok["stdout"].strip()
