@@ -39,8 +39,10 @@ the baseline and denied after hardening, each by the layer named on the edge.*
 
 ## The result
 
-From the live run, `evidence/eks-reference/report.md` (EKS 1.34, Cilium 1.20.4
-with AWS ENI IPAM, two nodes, deployed, measured and destroyed in one sitting):
+From the live EKS run, `evidence/eks-phase1/report.md` (EKS 1.36, Cilium 1.20.4
+with AWS ENI IPAM, two nodes, deployed, measured and destroyed in one sitting,
+run with the tightened evidence matchers; the earlier run is kept in
+`evidence/eks-reference/`):
 
 | Test | Baseline | Hardened | After reschedule | Enforcement evidence (hardened) |
 | ---- | -------- | -------- | ---------------- | ------------------------------- |
@@ -57,6 +59,30 @@ Two supplemental probes, both measured live:
 | ----- | -------- | -------- | -------- |
 | Pod reaches node instance metadata (`169.254.169.254`) | Allowed | Denied | Hubble `DROPPED POLICY_DENY`: the explicit `egressDeny`, not just default deny |
 | Pod reaches the public internet | Allowed | Denied | Hubble policy drop to the `world` identity |
+
+### The same matrix on AKS
+
+The identical runner and policy set ran on AKS 1.36 with a bring-your-own
+Cilium 1.20.4 (cluster-pool IPAM, VXLAN), because the managed Azure CNI
+Powered by Cilium cannot pin the version or the DNS reject code and keeps
+FQDN and L7 policy behind a paid add-on
+([ADR-0006](docs/adr/0006-aks-port-byo-cilium.md)). Evidence is
+`evidence/aks-phase1b/report.md`. All six rows matched on the same
+full-flow-identity matchers and the reschedule kept every Cilium identity
+(frontend `47712`) while every IP changed. AKS has two platform endpoints a
+pod can reach by default, so there is a seventh row.
+
+| Probe | Baseline | Hardened | After reschedule |
+| ----- | -------- | -------- | ---------------- |
+| Pod reaches node instance metadata (`169.254.169.254`) | Allowed | Denied | Denied |
+| Pod reaches the public internet | Allowed | Denied | Denied |
+| Pod reaches the Azure wire server (`168.63.129.16`), recorded as a finding | Allowed | Denied | Denied |
+
+![The lab on AKS](docs/architecture-azure.png)
+
+*The AKS variant. The wire server and instance metadata are separate rows so
+one verdict never hides the other. Host network pods are not covered by pod
+policy, and the report says so. Source: `docs/diagram_azure.py`.*
 
 The metadata probe is a reachability check (the IMDSv2 token endpoint answers),
 the precondition for T1552.005. It never requests a credential path and the
@@ -144,6 +170,17 @@ it could not first show was needed.
   under test. The failed run is kept in `evidence/eks-run1-fail/` as the
   receipt. A naive harness would have shown that row as "Denied" in both
   columns.
+- **The first AKS run failed on my own runner, not the policy** (`evidence/aks-phase1/`).
+  Azure RBAC answers a `can-i` denial as `no - <reason>` and the runner only
+  accepted a bare `no`, so it read the denial as an error and failed the run.
+  The matrix itself was identical to the passing rerun. The parser now accepts
+  the `no - <reason>` form, while empty or error answers still fail.
+- **Teardown removed the network before the pods that needed it.** The AKS
+  destroy plan uninstalled Cilium first, so replacement system pods had no CNI,
+  and a node pool could not drain because metrics-server and CoreDNS carry
+  PodDisruptionBudgets that allow zero disruptions. It failed after the
+  10 minute drain timeout. Cilium now stays until the cluster is destroyed
+  (ADR-0006 amendment).
 - **A naive drop matcher would have over-claimed.** The first evidence matcher
   accepted any `DROPPED` L3/L4 flow. It now requires a policy drop reason
   (`POLICY_DENIED` or `POLICY_DENY`), because a drop for any other reason is not
@@ -162,20 +199,21 @@ make kind-down
 ```
 
 Live EKS (one bounded session, operator runs the apply and destroy from saved
-plans): see [docs/runbook-aws.md](docs/runbook-aws.md).
+plans): see [docs/runbook-aws.md](docs/runbook-aws.md). AKS has `make aks-*`
+targets with the same saved-plan flow and a drain timeout on both node pools.
 
 ## Repository layout
 
 | Path | What it is |
 |------|------------|
-| `infra/` | VPC, EKS (two single-node groups), ECR, Cilium ENI IAM, node SG self rule. Local state, isolated account |
-| `cilium/` | Pinned Helm values (common, kind, EKS) and the readiness gate |
+| `infra/` | VPC, EKS (two single-node groups), ECR, Cilium ENI IAM, node SG self rule. Local state, isolated account. `infra/azure/` is the AKS root (two single-node pools, ACR) |
+| `cilium/` | Pinned Helm values (common, kind, EKS, AKS) and the readiness gate |
 | `kind/` | Local cluster config, default CNI disabled |
 | `app/` | One stdlib-only image for every role, plus the Kubernetes manifests |
 | `policy/baseline/` | Explicit allow-all `CiliumNetworkPolicy` per namespace |
 | `policy/hardened/` | Default deny, identity L3/L4, DNS proxy rule, L7 HTTP rule, metadata deny |
 | `scenarios/` | The runner and its unit tests |
-| `evidence/` | Live EKS and kind reference reports, the failed first EKS run, gzipped Hubble flows |
+| `evidence/` | Live EKS, AKS and kind reports, the failed first EKS run and failed first AKS run, gzipped Hubble flows |
 | `docs/` | ADRs, runbook, diagram source |
 
 Frameworks referenced: NSA/CISA Kubernetes Hardening Guidance (network
